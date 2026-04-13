@@ -1,0 +1,97 @@
+{% extends "admin/change_form.html" %}
+{% load i18n %}
+
+{# Adds "Fill with AI" next to default submit row for existing objects. #}
+
+{% block submit_buttons_bottom %}
+{{ block.super }}
+{% if ai_generate_url %}
+<div class="submit-row"
+  style="border-top: 1px solid var(--hairline-color, #e5e5e5); padding-top: 12px; margin-top: 8px;">
+  <button type="button" class="button default" id="visoway-ai-fill-btn" data-generate-url="{{ ai_generate_url }}"
+    style="background: #FF5722; color: #fff; padding:10px">
+    &#129302; {% trans "ASK AI" %}
+  </button>
+  <span id="visoway-ai-status" class="quiet" style="margin-inline-start: 12px;"></span>
+</div>
+<div id="visoway-ai-toast" role="status" aria-live="polite"
+  style="display: none; position: fixed; bottom: 24px; right: 24px; z-index: 10000; max-width: 360px; padding: 12px 16px; border-radius: 8px; font-size: 14px; box-shadow: 0 4px 16px rgba(0,0,0,0.15);">
+</div>
+<script>
+  (function () {
+    const btn = document.getElementById("visoway-ai-fill-btn");
+    if (!btn) return;
+    const statusEl = document.getElementById("visoway-ai-status");
+    const toastEl = document.getElementById("visoway-ai-toast");
+    const url = btn.getAttribute("data-generate-url");
+    const formId = "{{ opts.model_name }}_form";
+    const form = document.getElementById(formId);
+    const csrfInput = form ? form.querySelector("[name=csrfmiddlewaretoken]") : null;
+    const csrfToken = csrfInput ? csrfInput.value : null;
+
+    function showToast(message, isError) {
+      if (!toastEl) {
+        if (isError) window.alert(message);
+        return;
+      }
+      toastEl.textContent = message;
+      toastEl.style.display = "block";
+      toastEl.style.background = isError ? "#3b0d0d" : "#0d3b1f";
+      toastEl.style.color = "#fff";
+      toastEl.style.border = "1px solid " + (isError ? "#7a1f1f" : "#1f7a3f");
+    }
+
+    btn.addEventListener("click", function () {
+      if (!url) return;
+      if (!csrfToken) {
+        showToast("{% trans 'CSRF token not found. Reload the page and try again.' %}", true);
+        return;
+      }
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = "{% trans 'Generating…' %}";
+      if (statusEl) statusEl.textContent = "";
+
+      fetch(url, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "X-CSRFToken": csrfToken,
+          Accept: "application/json",
+        },
+      })
+        .then(function (res) {
+          return res.json().then(function (body) {
+            return { ok: res.ok, status: res.status, body: body };
+          });
+        })
+        .then(function (result) {
+          if (result.ok && result.body && result.body.ok) {
+            const fields = (result.body.updated_fields || []).join(", ");
+            showToast("{% trans 'AI content saved.' %} " + (fields ? "(" + fields + ")" : ""), false);
+            if (statusEl) statusEl.textContent = "{% trans 'Reloading…' %}";
+            window.setTimeout(function () {
+              window.location.reload();
+            }, 600);
+          } else {
+            const msg =
+              (result.body && result.body.error) ||
+              "{% trans 'Request failed.' %} (" + result.status + ")";
+            showToast(msg, true);
+            if (statusEl) statusEl.textContent = msg;
+          }
+        })
+        .catch(function () {
+          const msg = "{% trans 'Network error. Try again.' %}";
+          showToast(msg, true);
+          if (statusEl) statusEl.textContent = msg;
+        })
+        .finally(function () {
+          btn.disabled = false;
+          btn.textContent = original;
+        });
+    });
+  })();
+</script>
+{% endif %}
+{% endblock %}

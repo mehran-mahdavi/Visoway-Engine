@@ -10,10 +10,15 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load environment variables from .env file
+load_dotenv(BASE_DIR / ".env")
 
 
 # Quick-start development settings - unsuitable for production
@@ -132,3 +137,18 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
 }
+
+# OpenRouter (admin "Fill with AI") — set OPENROUTER_API_KEY in the environment.
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.environ.get(
+    "OPENROUTER_MODEL",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+)
+OPENROUTER_API_URL = os.environ.get(
+    "OPENROUTER_API_URL",
+    "https://openrouter.ai/api/v1/chat/completions",
+)
+OPENROUTER_TIMEOUT = int(os.environ.get("OPENROUTER_TIMEOUT", "120"))
+# Optional OpenRouter attribution (recommended for production listings)
+OPENROUTER_HTTP_REFERER = os.environ.get("OPENROUTER_HTTP_REFERER", "")
+OPENROUTER_APP_TITLE = os.environ.get("OPENROUTER_APP_TITLE", "VisoWay API")

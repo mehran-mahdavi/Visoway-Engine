@@ -1,0 +1,208 @@
+{% extends "admin/change_form.html" %}
+{% load i18n %}
+
+{% block object-tools %}
+{{ block.super }}
+
+<div id="visoway-ai-tools" style="margin-bottom: 20px; padding: 15px; background: var(--body-bg, #f8f8f8); border: 1px solid var(--hairline-color, #e5e5e5); border-radius: 4px;">
+    <h3 style="margin-top: 0;">🤖 AI Assistant</h3>
+    <p style="font-size: 13px; color: var(--body-quiet-color, #666);">Select a country first to enable AI features.</p>
+    
+    <div style="display: flex; gap: 10px; margin-top: 10px;">
+        <button type="button" id="btn-suggest-visas" class="button" disabled style="padding: 8px 15px; font-weight: bold;">
+            Suggest Missing Visas
+        </button>
+        <button type="button" id="btn-generate-data" class="button default" disabled style="padding: 8px 15px; font-weight: bold; background: #FF5722;">
+            Generate Visa Data
+        </button>
+    </div>
+
+    <!-- Container for suggestions -->
+    <div id="ai-suggestions-container" style="display: none; margin-top: 15px; padding: 10px; background: #fff; border: 1px dashed #ccc;">
+        <h4 style="margin-top: 0; margin-bottom: 10px;">Suggested Visa Types</h4>
+        <ul id="ai-suggestions-list" style="margin: 0; padding-left: 20px;"></ul>
+        <p style="font-size: 12px; color: #666; margin-top: 10px; margin-bottom: 0;">* Copy a suggestion to the Type field to generate its data.</p>
+    </div>
+</div>
+
+<!-- Hidden field to transmit AI relations to backend for bulk_create on save -->
+<input type="hidden" name="_ai_relations_data" id="_ai_relations_data" value="">
+
+<div id="visoway-ai-toast" role="status" aria-live="polite" style="display: none; position: fixed; bottom: 24px; right: 24px; z-index: 10000; max-width: 360px; padding: 12px 16px; border-radius: 8px; font-size: 14px; box-shadow: 0 4px 16px rgba(0,0,0,0.15);"></div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const countrySelect = document.getElementById("id_country");
+    const btnSuggest = document.getElementById("btn-suggest-visas");
+    const btnGenerate = document.getElementById("btn-generate-data");
+    const suggestionsContainer = document.getElementById("ai-suggestions-container");
+    const suggestionsList = document.getElementById("ai-suggestions-list");
+    const toastEl = document.getElementById("visoway-ai-toast");
+    const hiddenRelations = document.getElementById("_ai_relations_data");
+    
+    const formId = "{{ opts.model_name }}_form";
+    const form = document.getElementById(formId);
+    const csrfToken = form ? form.querySelector("[name=csrfmiddlewaretoken]").value : "";
+
+    function showToast(message, isError) {
+        if (!toastEl) return;
+        toastEl.textContent = message;
+        toastEl.style.display = "block";
+        toastEl.style.background = isError ? "#3b0d0d" : "#0d3b1f";
+        toastEl.style.color = "#fff";
+        toastEl.style.border = "1px solid " + (isError ? "#7a1f1f" : "#1f7a3f");
+        
+        setTimeout(() => { toastEl.style.display = "none"; }, 5000);
+    }
+
+    function toggleButtons() {
+        const hasCountry = countrySelect && countrySelect.value;
+        btnSuggest.disabled = !hasCountry;
+        btnGenerate.disabled = !hasCountry;
+    }
+
+    if (countrySelect) {
+        countrySelect.addEventListener("change", toggleButtons);
+        toggleButtons();
+    }
+
+    // SUGGEST VISAS
+    btnSuggest.addEventListener("click", function() {
+        if (!countrySelect.value) {
+            showToast("Select country first", true);
+            return;
+        }
+
+        const originalText = btnSuggest.textContent;
+        btnSuggest.textContent = "Generating...";
+        btnSuggest.disabled = true;
+
+        fetch("/admin/visas/visa/suggest-ai/", {
+            method: "POST",
+            headers: {
+                "X-CSRFToken": csrfToken,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ country_id: countrySelect.value, country_name: countrySelect.options[countrySelect.selectedIndex].text })
+        })
+        .then(res => res.json().then(data => ({ status: res.status, body: data })))
+        .then(result => {
+            if (result.status === 200 && result.body.suggestions) {
+                suggestionsList.innerHTML = "";
+                if (result.body.suggestions.length === 0) {
+                    const li = document.createElement("li");
+                    li.textContent = "No new suggestions found.";
+                    suggestionsList.appendChild(li);
+                } else {
+                    result.body.suggestions.forEach(s => {
+                        const li = document.createElement("li");
+                        li.textContent = s;
+                        li.style.cursor = "pointer";
+                        li.style.color = "#0066cc";
+                        li.style.textDecoration = "underline";
+                        li.onclick = function() {
+                            document.getElementById("id_type").value = s;
+                            if(!document.getElementById("id_name").value) {
+                                const countryName = countrySelect.options[countrySelect.selectedIndex].text;
+                                document.getElementById("id_name").value = s + " Visa - " + countryName;
+                            }
+                        };
+                        suggestionsList.appendChild(li);
+                    });
+                }
+                suggestionsContainer.style.display = "block";
+                showToast("Suggestions loaded.", false);
+            } else {
+                showToast(result.body.error || "Failed to fetch suggestions.", true);
+            }
+        })
+        .catch(() => showToast("Network error. Try again.", true))
+        .finally(() => {
+            btnSuggest.textContent = originalText;
+            btnSuggest.disabled = false;
+        });
+    });
+
+    // GENERATE VISA DATA
+    btnGenerate.addEventListener("click", function() {
+        if (!countrySelect.value) {
+            showToast("Select country first", true);
+            return;
+        }
+
+        const originalText = btnGenerate.textContent;
+        btnGenerate.textContent = "Generating...";
+        btnGenerate.disabled = true;
+
+        const partialData = {
+            name: document.getElementById("id_name")?.value,
+            type: document.getElementById("id_type")?.value,
+            description: document.getElementById("id_description")?.value,
+            difficulty: document.getElementById("id_difficulty")?.value
+        };
+
+        fetch("/admin/visas/visa/generate-ai/", {
+            method: "POST",
+            headers: {
+                "X-CSRFToken": csrfToken,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                country_id: countrySelect.value,
+                type: document.getElementById("id_type")?.value,
+                partial_data: partialData
+            })
+        })
+        .then(res => res.json().then(data => ({ status: res.status, body: data })))
+        .then(result => {
+            if (result.status === 200 && result.body.data) {
+                const data = result.body.data;
+                
+                // Populate scalar fields dynamically
+                const fieldMapping = {
+                    "name": "id_name",
+                    "type": "id_type",
+                    "description": "id_description",
+                    "roadmap": "id_roadmap",
+                    "cost": "id_cost",
+                    "currency": "id_currency",
+                    "stay_duration_days": "id_stay_duration_days",
+                    "process_time_days": "id_process_time_days",
+                    "difficulty": "id_difficulty"
+                };
+
+                for (const [jsonKey, elementId] of Object.entries(fieldMapping)) {
+                    const el = document.getElementById(elementId);
+                    if (el && data[jsonKey] !== undefined && data[jsonKey] !== null) {
+                        el.value = data[jsonKey];
+                    }
+                }
+                
+                // For relations, we store the JSON in the hidden field so the backend
+                // can bulk_create them efficiently using transaction.atomic
+                const relations = {
+                    roadmap_steps: data.roadmap_steps || [],
+                    required_documents: data.required_documents || [],
+                    tips: data.tips || [],
+                    faqs: data.faqs || []
+                };
+                
+                hiddenRelations.value = JSON.stringify(relations);
+                
+                // Show summary
+                const countStr = `Steps: ${relations.roadmap_steps.length}, Docs: ${relations.required_documents.length}, Tips: ${relations.tips.length}, FAQs: ${relations.faqs.length}`;
+                
+                showToast(`Data generated! ${countStr}. Save form to commit relations.`, false);
+            } else {
+                showToast(result.body.error || "Failed to generate data.", true);
+            }
+        })
+        .catch(() => showToast("Network error. Try again.", true))
+        .finally(() => {
+            btnGenerate.textContent = originalText;
+            btnGenerate.disabled = false;
+        });
+    });
+});
+</script>
+{% endblock %}
